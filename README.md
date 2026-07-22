@@ -18,3 +18,5 @@ mkdir build
 cd build
 cmake ..
 make -j4
+
+./hypersurface_builder 
