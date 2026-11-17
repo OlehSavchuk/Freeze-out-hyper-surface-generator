@@ -42,37 +42,28 @@ void read_from_file(std::vector<double>& b, std::ifstream& f,int size)
     }
 }
 
-// Reads 4D spatial-temporal fields from binary files into the 5D storage vector[cite: 6]
-void read_cells_element(std::string element,std::vector<std::vector<std::vector<std::vector<double>>>>& cells, int size)
+// Reads one time slice [x][y][z] (nbins^3 doubles) of a 4D field file into cells[x][y][z]
+void read_slice(std::ifstream& file, int t, std::vector<std::vector<std::vector<double>>>& cells, int size)
 {
-    std::ifstream file(element,std::ios::binary);
-    if (!file) {
-        std::cerr << "cannot open " << element << std::endl;
-        std::exit(1);
-    }
-    for(int t=0;t<size;t++)
-    {
-        for(int x=0;x<size;x++)
+    file.clear();
+    file.seekg((std::streamoff)t*size*size*size*sizeof(double), std::ios::beg);
+    for(int x=0;x<size;x++)
+        for(int y=0;y<size;y++)
         {
-            for(int y=0;y<size;y++)
-            {
-                read_from_file(cells[t][x][y],file,size);
-            }
+            file.read(reinterpret_cast<char*>(cells[x][y].data()),sizeof(double)*size);
+            if(!file) { std::cerr << "read error at t=" << t << std::endl; std::exit(1); }
         }
-    }
-    file.close();
 }
 
 // Cells without matter have no momentum anisotropy (NaN in the extracted files). They are replaced
 // by `fill` (1 = isotropic) so that the linear interpolation near the surface is not poisoned.
-long long fill_nan(std::vector<std::vector<std::vector<std::vector<double>>>>& cells, double fill)
+long long fill_nan(std::vector<std::vector<std::vector<double>>>& cells, double fill)
 {
     long long count = 0;
-    for (auto& a : cells)
-        for (auto& b : a)
-            for (auto& c : b)
-                for (auto& v : c)
-                    if (!std::isfinite(v)) { v = fill; count++; }
+    for (auto& b : cells)
+        for (auto& c : b)
+            for (auto& v : c)
+                if (!std::isfinite(v)) { v = fill; count++; }
     return count;
 }
 
@@ -102,82 +93,56 @@ int main(int argc, char** argv)
     // Optional local momentum anisotropy: files exx.dat, eyy.dat, ezz.dat (= 3Txx/(Txx+Tyy+Tzz) etc.)
     // on the same grid as e.dat, n.dat, ...; they are interpolated and appended to the surface output.
     // config: "anisotropy 1" to enable, "aniso_fill 1.0" = value used for cells without matter (NaN)
-    bool use_aniso = params.count("anisotropy") && std::stoi(params["anisotropy"]) != 0;
+    int aniso_mode = params.count("anisotropy") ? std::stoi(params["anisotropy"]) : 0;   // 0 off, 1 diagonal (exx,eyy,ezz), 2 full tensor (+exy,exz,eyz)
+    bool use_aniso = aniso_mode != 0;
     double aniso_fill = params.count("aniso_fill") ? std::stod(params["aniso_fill"]) : 1.0;
-    const int nq = use_aniso ? 10 : 7;
+    const int nq = aniso_mode >= 2 ? 13 : (aniso_mode == 1 ? 10 : 7);
 
     // Grid calculations
-    double dV = dx*dx*dx;
     int nbins=xmax/dx;
-    double d4x=dV*dx;
 
     // Define indices for the 7 fluid quantities[cite: 6]
-    enum columns{ e,T,n,gamma,vx,vy,vz,exx,eyy,ezz };
+    enum columns{ e,T,n,gamma,vx,vy,vz,exx,eyy,ezz,exy,exz,eyz };
     
-    // Allocate a 5D vector to store [quantity][time][x][y][z] initialized to zero[cite: 6]
-    std::vector<std::vector<std::vector<std::vector<std::vector<double>>>>> Tnv(nq,std::vector<std::vector<std::vector<std::vector<double>>>>(nbins,std::vector<std::vector<std::vector<double>>>(nbins,std::vector<std::vector<double>>(nbins,std::vector<double>(nbins,0)))));
-    
-    std::cout<<"Begin reading temperatures densities etc"<<std::endl;
-    // Load physical properties from the specified path[cite: 6]
-    read_cells_element(path+"/e.dat",Tnv[e],nbins);
-    read_cells_element(path+"/n.dat",Tnv[n],nbins);
-    std::cout<<"read n"<<std::endl;
-    read_cells_element(path+"/gamma.dat",Tnv[gamma],nbins);
-    std::cout<<"read gamma"<<std::endl;
-    read_cells_element(path+"/vx.dat",Tnv[vx],nbins);
-    read_cells_element(path+"/vy.dat",Tnv[vy],nbins);
-    read_cells_element(path+"/vz.dat",Tnv[vz],nbins);
-    std::cout<<"read v"<<std::endl;
-    if (use_aniso)
+    // Rolling window: only two time slices [slot][x][y][z] per quantity are kept in memory
+    typedef std::vector<std::vector<std::vector<double>>> Cube3;
+    std::vector<std::vector<Cube3>> Tnv(nq,std::vector<Cube3>(2,Cube3(nbins,std::vector<std::vector<double>>(nbins,std::vector<double>(nbins,0)))));
+    const char* fname[13]={"e.dat",nullptr,"n.dat","gamma.dat","vx.dat","vy.dat","vz.dat","exx.dat","eyy.dat","ezz.dat","exy.dat","exz.dat","eyz.dat"};
+    std::vector<std::ifstream> files(nq);
+    for(int q=0;q<nq;q++)
     {
-        read_cells_element(path+"/exx.dat",Tnv[exx],nbins);
-        read_cells_element(path+"/eyy.dat",Tnv[eyy],nbins);
-        read_cells_element(path+"/ezz.dat",Tnv[ezz],nbins);
-        long long nfill = fill_nan(Tnv[exx],aniso_fill) + fill_nan(Tnv[eyy],aniso_fill) + fill_nan(Tnv[ezz],aniso_fill);
-        std::cout<<"read local momentum anisotropy exx, eyy, ezz (" << nfill << " empty-cell values set to " << aniso_fill << ")"<<std::endl;
+        if(!fname[q]) continue;
+        files[q].open(path+"/"+fname[q],std::ios::binary);
+        if(!files[q]) { std::cerr << "cannot open " << path+"/"+fname[q] << std::endl; return 1; }
     }
-    std::cout<<"Finished reading temperatures densities etc"<<std::endl;
-
-    int nt = tend; // Using 'tend' as the total time steps to process
+    auto load = [&](int slot,int t){
+        for(int q=0;q<nq;q++){
+            if(!fname[q]) continue;
+            read_slice(files[q],t,Tnv[q][slot],nbins);
+            if(q>=exx) fill_nan(Tnv[q][slot], q>=exy ? 0.0 : aniso_fill);   // empty cells: isotropic (e_ii = 1, e_ij = 0)
+        }
+    };
+    std::string outfile = params.count("outfile") ? params["outfile"] : std::string("surface.dat");
     double Nfreeze = n0;
+    int nt = tend;
+    HyperSurfaceBuilder builder(nt, nx, ny, nz, Nfreeze, dt, dx, nq, outfile);
 
-    // Initialize the surface builder with the loaded parameters[cite: 6]
-    HyperSurfaceBuilder builder(nt, nx, ny, nz, Nfreeze, dt, dx, nq);
-    
-    // Iterate over the 4D spacetime grid to find the freeze-out surface[cite: 6]
+    load(0,tstart); load(1,tstart+1);
     for(int i=tstart;i<tend-1;i++)
     {
+        if(i>tstart){ for(int q=0;q<nq;q++) std::swap(Tnv[q][0],Tnv[q][1]); load(1,i+1); }
         std::cout<< "Processing timestep: " << i << std::endl;
         for(int j=0;j<nx-1;j++)
-        {
             for(int k=0;k<ny-1;k++)
-            {
                 for(int l=0;l<nz-1;l++)
                 {
-                    int test_prev=0;
-                    int test_curr=0;
-                    
-                    // Check a 2x2x2 cube of cells to see if the density crosses the freeze-out threshold n0[cite: 6]
-                    for (int jj=0;jj<2;jj++)
-                    {
-                        for (int kk=0;kk<2;kk++)
-                        {
-                            for (int ll=0;ll<2;ll++)
-                            {
-                                test_prev += Tnv[n][i][j+jj][k+kk][l+ll]>n0;
-                                test_curr += Tnv[n][i+1][j+jj][k+kk][l+ll]<n0;
-                            }
-                        }
-                    }
-                    // If the surface crosses this local hypercube, extract the hypersurface elements[cite: 6]
-                    // (Note: The if-statement condition was commented out in the original source, uncomment if needed)
-                    //if(test_curr && test_prev)
-                    {
-                        builder.find_elements(i,j,k,l,Tnv);
-                    }
+                    // skip hypercubes in which n is on the same side of n0 at all 16 corners (no surface element possible)
+                    int above=0;
+                    for(int tt=0;tt<2;tt++) for(int jj=0;jj<2;jj++) for(int kk=0;kk<2;kk++) for(int ll=0;ll<2;ll++)
+                        above += Tnv[n][tt][j+jj][k+kk][l+ll] > n0;
+                    if(above==0 || above==16) continue;
+                    builder.find_elements(i,0,j,k,l,Tnv);
                 }
-            }
-        }
     }
     return 0;
 }

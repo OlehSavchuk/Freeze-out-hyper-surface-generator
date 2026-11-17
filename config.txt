@@ -9,6 +9,6 @@ n0 0.02
 nx 100
 ny 100
 nz 100
-# Local momentum anisotropy (reads exx.dat, eyy.dat, ezz.dat from path): 1 = on
+# Local momentum anisotropy (reads exx.dat, eyy.dat, ezz.dat from path): 1 = diagonal; 2 = full tensor (also exy.dat, exz.dat, eyz.dat)
 anisotropy 0
 aniso_fill 1.0

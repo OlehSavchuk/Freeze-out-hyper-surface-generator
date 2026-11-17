@@ -1,7 +1,7 @@
 #include "hypersurface_builder.hpp"
 
 // Performs sequential linear interpolation across 4 dimensions[cite: 8]
-void HyperSurfaceBuilder::fD_Interpolate(std::vector<double> shift,double to_interpolate[10][2][2][2][2], std::vector<double>& interpolated)
+void HyperSurfaceBuilder::fD_Interpolate(std::vector<double> shift,double to_interpolate[13][2][2][2][2], std::vector<double>& interpolated)
 {
     // Loop through all 7 physical quantities (energy, density, velocity, etc.)[cite: 8]
     for(int ii=0;ii<nq_;ii++)
@@ -42,10 +42,10 @@ void HyperSurfaceBuilder::fD_Interpolate(std::vector<double> shift,double to_int
 }
 
 // Constructor: Initializes the grid, output file, and the Cornelius algorithm[cite: 8]
-HyperSurfaceBuilder::HyperSurfaceBuilder(int nt, int nx, int ny, int nz, double freezeout_N, double dt, double dx, int nq)
+HyperSurfaceBuilder::HyperSurfaceBuilder(int nt, int nx, int ny, int nz, double freezeout_N, double dt, double dx, int nq, const std::string& outfile)
     : nt_(nt), nx_(nx), ny_(ny), nz_(nz), nq_(nq), Nfreeze_(freezeout_N)
     {
-    this->s_file.open("surface.dat"); // File where hypersurface elements are written[cite: 8]
+    this->s_file.open(outfile); // File where hypersurface elements are written[cite: 8]
     this->dim = 4;
     this->DT = dt;
     this->DX = dx;
@@ -59,7 +59,7 @@ HyperSurfaceBuilder::HyperSurfaceBuilder(int nt, int nx, int ny, int nz, double 
 }
 
 // Extracts hypersurface elements from a localized 2x2x2x2 grid[cite: 8]
-void HyperSurfaceBuilder::find_elements(int i,int j, int k, int l, std::vector<std::vector<std::vector<std::vector<std::vector<double>>>>>& Tnv)
+void HyperSurfaceBuilder::find_elements(int i,int ti,int j, int k, int l, std::vector<std::vector<std::vector<std::vector<std::vector<double>>>>>& Tnv)
 {
     double lattice_spacing[4] = {DT, DX, DY, DZ};
 
@@ -80,45 +80,45 @@ void HyperSurfaceBuilder::find_elements(int i,int j, int k, int l, std::vector<s
     }
 
     // Array to store all 7 physical quantities across the localized hypercube[cite: 8]
-    double hydro_cube[10][2][2][2][2];
+    double hydro_cube[13][2][2][2][2];
 
     // Populate the 4D cube with density values (used by Cornelius to locate the surface)[cite: 8]
-    cube[0][0][0][0] = Tnv[n][i][j][k][l];
-    cube[0][0][1][0] = Tnv[n][i][j][k+1][l];
-    cube[0][1][0][0] = Tnv[n][i][j+1][k][l];
-    cube[0][1][1][0] = Tnv[n][i][j+1][k+1][l];
-    cube[1][0][0][0] = Tnv[n][i+1][j][k][l];
-    cube[1][0][1][0] = Tnv[n][i+1][j][k+1][l];
-    cube[1][1][0][0] = Tnv[n][i+1][j+1][k][l];
-    cube[1][1][1][0] = Tnv[n][i+1][j+1][k+1][l];
-    cube[0][0][0][1] = Tnv[n][i][j][k][l+1];
-    cube[0][0][1][1] = Tnv[n][i][j][k+1][l+1];
-    cube[0][1][0][1] = Tnv[n][i][j+1][k][l+1];
-    cube[0][1][1][1] = Tnv[n][i][j+1][k+1][l+1];
-    cube[1][0][0][1] = Tnv[n][i+1][j][k][l+1];
-    cube[1][0][1][1] = Tnv[n][i+1][j][k+1][l+1];
-    cube[1][1][0][1] = Tnv[n][i+1][j+1][k][l+1];
-    cube[1][1][1][1] = Tnv[n][i+1][j+1][k+1][l+1];
+    cube[0][0][0][0] = Tnv[n][ti][j][k][l];
+    cube[0][0][1][0] = Tnv[n][ti][j][k+1][l];
+    cube[0][1][0][0] = Tnv[n][ti][j+1][k][l];
+    cube[0][1][1][0] = Tnv[n][ti][j+1][k+1][l];
+    cube[1][0][0][0] = Tnv[n][ti+1][j][k][l];
+    cube[1][0][1][0] = Tnv[n][ti+1][j][k+1][l];
+    cube[1][1][0][0] = Tnv[n][ti+1][j+1][k][l];
+    cube[1][1][1][0] = Tnv[n][ti+1][j+1][k+1][l];
+    cube[0][0][0][1] = Tnv[n][ti][j][k][l+1];
+    cube[0][0][1][1] = Tnv[n][ti][j][k+1][l+1];
+    cube[0][1][0][1] = Tnv[n][ti][j+1][k][l+1];
+    cube[0][1][1][1] = Tnv[n][ti][j+1][k+1][l+1];
+    cube[1][0][0][1] = Tnv[n][ti+1][j][k][l+1];
+    cube[1][0][1][1] = Tnv[n][ti+1][j][k+1][l+1];
+    cube[1][1][0][1] = Tnv[n][ti+1][j+1][k][l+1];
+    cube[1][1][1][1] = Tnv[n][ti+1][j+1][k+1][l+1];
 
     // Populate the full hydro_cube with all 7 variables for interpolation[cite: 8]
     for(int ii=0;ii<nq_;ii++)
     {
-        hydro_cube[ii][0][0][0][0] = Tnv[ii][i][j][k][l];
-        hydro_cube[ii][0][0][1][0] = Tnv[ii][i][j][k+1][l];
-        hydro_cube[ii][0][1][0][0] = Tnv[ii][i][j+1][k][l];
-        hydro_cube[ii][0][1][1][0] = Tnv[ii][i][j+1][k+1][l];
-        hydro_cube[ii][1][0][0][0] = Tnv[ii][i+1][j][k][l];
-        hydro_cube[ii][1][0][1][0] = Tnv[ii][i+1][j][k+1][l];
-        hydro_cube[ii][1][1][0][0] = Tnv[ii][i+1][j+1][k][l];
-        hydro_cube[ii][1][1][1][0] = Tnv[ii][i+1][j+1][k+1][l];
-        hydro_cube[ii][0][0][0][1] = Tnv[ii][i][j][k][l+1];
-        hydro_cube[ii][0][0][1][1] = Tnv[ii][i][j][k+1][l+1];
-        hydro_cube[ii][0][1][0][1] = Tnv[ii][i][j+1][k][l+1];
-        hydro_cube[ii][0][1][1][1] = Tnv[ii][i][j+1][k+1][l+1];
-        hydro_cube[ii][1][0][0][1] = Tnv[ii][i+1][j][k][l+1];
-        hydro_cube[ii][1][0][1][1] = Tnv[ii][i+1][j][k+1][l+1];
-        hydro_cube[ii][1][1][0][1] = Tnv[ii][i+1][j+1][k][l+1];
-        hydro_cube[ii][1][1][1][1] = Tnv[ii][i+1][j+1][k+1][l+1];
+        hydro_cube[ii][0][0][0][0] = Tnv[ii][ti][j][k][l];
+        hydro_cube[ii][0][0][1][0] = Tnv[ii][ti][j][k+1][l];
+        hydro_cube[ii][0][1][0][0] = Tnv[ii][ti][j+1][k][l];
+        hydro_cube[ii][0][1][1][0] = Tnv[ii][ti][j+1][k+1][l];
+        hydro_cube[ii][1][0][0][0] = Tnv[ii][ti+1][j][k][l];
+        hydro_cube[ii][1][0][1][0] = Tnv[ii][ti+1][j][k+1][l];
+        hydro_cube[ii][1][1][0][0] = Tnv[ii][ti+1][j+1][k][l];
+        hydro_cube[ii][1][1][1][0] = Tnv[ii][ti+1][j+1][k+1][l];
+        hydro_cube[ii][0][0][0][1] = Tnv[ii][ti][j][k][l+1];
+        hydro_cube[ii][0][0][1][1] = Tnv[ii][ti][j][k+1][l+1];
+        hydro_cube[ii][0][1][0][1] = Tnv[ii][ti][j+1][k][l+1];
+        hydro_cube[ii][0][1][1][1] = Tnv[ii][ti][j+1][k+1][l+1];
+        hydro_cube[ii][1][0][0][1] = Tnv[ii][ti+1][j][k][l+1];
+        hydro_cube[ii][1][0][1][1] = Tnv[ii][ti+1][j][k+1][l+1];
+        hydro_cube[ii][1][1][0][1] = Tnv[ii][ti+1][j+1][k][l+1];
+        hydro_cube[ii][1][1][1][1] = Tnv[ii][ti+1][j+1][k+1][l+1];
     }
     
     std::vector<std::vector<double>> surface_elements;
@@ -164,18 +164,16 @@ void HyperSurfaceBuilder::find_elements(int i,int j, int k, int l, std::vector<s
             surface_element.push_back(interpolated[ii]);
         }
         surface_elements.push_back(surface_element);
-    
-        // 5. Write the extracted element to the output file[cite: 8]
-        for(int ii=0;ii<surface_elements.size();ii++)
-        {
-            for(int jj=0;jj<surface_elements[ii].size();jj++)
-            {
-                s_file<<surface_elements[ii][jj] << "    ";
-            }
-            s_file<<std::endl;
-        }
     }
-    
+
+    // 5. Write the extracted elements to the output file
+    for(size_t ii=0;ii<surface_elements.size();ii++)
+    {
+        for(size_t jj=0;jj<surface_elements[ii].size();jj++)
+            s_file<<surface_elements[ii][jj] << "    ";
+        s_file<<std::endl;
+    }
+
     // Free the dynamically allocated 4D cube memory[cite: 8]
     for (int ia = 0; ia < 2; ++ia) {
         for (int ib = 0; ib < 2; ++ib) {
