@@ -1,10 +1,10 @@
 #include "hypersurface_builder.hpp"
 
 // Performs sequential linear interpolation across 4 dimensions[cite: 8]
-void HyperSurfaceBuilder::fD_Interpolate(std::vector<double> shift,double to_interpolate[7][2][2][2][2], std::vector<double>& interpolated)
+void HyperSurfaceBuilder::fD_Interpolate(std::vector<double> shift,double to_interpolate[10][2][2][2][2], std::vector<double>& interpolated)
 {
     // Loop through all 7 physical quantities (energy, density, velocity, etc.)[cite: 8]
-    for(int ii=0;ii<7;ii++)
+    for(int ii=0;ii<nq_;ii++)
     {
         // 1. Interpolate across time (DT) to collapse from 4D down to 3D[cite: 8]
         double interpolated_3D[2][2][2];
@@ -42,8 +42,8 @@ void HyperSurfaceBuilder::fD_Interpolate(std::vector<double> shift,double to_int
 }
 
 // Constructor: Initializes the grid, output file, and the Cornelius algorithm[cite: 8]
-HyperSurfaceBuilder::HyperSurfaceBuilder(int nt, int nx, int ny, int nz, double freezeout_N, double dt, double dx)
-    : nt_(nt), nx_(nx), ny_(ny), nz_(nz), Nfreeze_(freezeout_N)
+HyperSurfaceBuilder::HyperSurfaceBuilder(int nt, int nx, int ny, int nz, double freezeout_N, double dt, double dx, int nq)
+    : nt_(nt), nx_(nx), ny_(ny), nz_(nz), nq_(nq), Nfreeze_(freezeout_N)
     {
     this->s_file.open("surface.dat"); // File where hypersurface elements are written[cite: 8]
     this->dim = 4;
@@ -80,7 +80,7 @@ void HyperSurfaceBuilder::find_elements(int i,int j, int k, int l, std::vector<s
     }
 
     // Array to store all 7 physical quantities across the localized hypercube[cite: 8]
-    double hydro_cube[7][2][2][2][2];
+    double hydro_cube[10][2][2][2][2];
 
     // Populate the 4D cube with density values (used by Cornelius to locate the surface)[cite: 8]
     cube[0][0][0][0] = Tnv[n][i][j][k][l];
@@ -101,7 +101,7 @@ void HyperSurfaceBuilder::find_elements(int i,int j, int k, int l, std::vector<s
     cube[1][1][1][1] = Tnv[n][i+1][j+1][k+1][l+1];
 
     // Populate the full hydro_cube with all 7 variables for interpolation[cite: 8]
-    for(int ii=0;ii<7;ii++)
+    for(int ii=0;ii<nq_;ii++)
     {
         hydro_cube[ii][0][0][0][0] = Tnv[ii][i][j][k][l];
         hydro_cube[ii][0][0][1][0] = Tnv[ii][i][j][k+1][l];
@@ -155,11 +155,11 @@ void HyperSurfaceBuilder::find_elements(int i,int j, int k, int l, std::vector<s
 
         // 4. Perform 4D linear interpolation for all fluid quantities at the centroid[cite: 8]
         std::vector<double> shift={x_fraction[0],x_fraction[1],x_fraction[2],x_fraction[3]};
-        std::vector<double> interpolated(7,0);
+        std::vector<double> interpolated(nq_,0);
         HyperSurfaceBuilder::fD_Interpolate(shift, hydro_cube, interpolated);
         
-        // Append the interpolated physical quantities (T, e, v, etc.) to the element data[cite: 8]
-        for(int ii=0;ii<7;ii++)
+        // Append the interpolated physical quantities (e, T, n, gamma, vx, vy, vz and, if enabled, exx, eyy, ezz) to the element data
+        for(int ii=0;ii<nq_;ii++)
         {
             surface_element.push_back(interpolated[ii]);
         }

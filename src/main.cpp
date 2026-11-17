@@ -3,6 +3,8 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <cmath>
+#include <cstdlib>
 #include <map>
 #include <sstream>
 
@@ -44,6 +46,10 @@ void read_from_file(std::vector<double>& b, std::ifstream& f,int size)
 void read_cells_element(std::string element,std::vector<std::vector<std::vector<std::vector<double>>>>& cells, int size)
 {
     std::ifstream file(element,std::ios::binary);
+    if (!file) {
+        std::cerr << "cannot open " << element << std::endl;
+        std::exit(1);
+    }
     for(int t=0;t<size;t++)
     {
         for(int x=0;x<size;x++)
@@ -55,6 +61,19 @@ void read_cells_element(std::string element,std::vector<std::vector<std::vector<
         }
     }
     file.close();
+}
+
+// Cells without matter have no momentum anisotropy (NaN in the extracted files). They are replaced
+// by `fill` (1 = isotropic) so that the linear interpolation near the surface is not poisoned.
+long long fill_nan(std::vector<std::vector<std::vector<std::vector<double>>>>& cells, double fill)
+{
+    long long count = 0;
+    for (auto& a : cells)
+        for (auto& b : a)
+            for (auto& c : b)
+                for (auto& v : c)
+                    if (!std::isfinite(v)) { v = fill; count++; }
+    return count;
 }
 
 // --- MAIN EXECUTION ---
@@ -80,16 +99,23 @@ int main(int argc, char** argv)
     int nz = std::stoi(params["nz"]);
     std::string path = params["path"];
 
+    // Optional local momentum anisotropy: files exx.dat, eyy.dat, ezz.dat (= 3Txx/(Txx+Tyy+Tzz) etc.)
+    // on the same grid as e.dat, n.dat, ...; they are interpolated and appended to the surface output.
+    // config: "anisotropy 1" to enable, "aniso_fill 1.0" = value used for cells without matter (NaN)
+    bool use_aniso = params.count("anisotropy") && std::stoi(params["anisotropy"]) != 0;
+    double aniso_fill = params.count("aniso_fill") ? std::stod(params["aniso_fill"]) : 1.0;
+    const int nq = use_aniso ? 10 : 7;
+
     // Grid calculations
     double dV = dx*dx*dx;
     int nbins=xmax/dx;
     double d4x=dV*dx;
 
     // Define indices for the 7 fluid quantities[cite: 6]
-    enum columns{ e,T,n,gamma,vx,vy,vz };
+    enum columns{ e,T,n,gamma,vx,vy,vz,exx,eyy,ezz };
     
     // Allocate a 5D vector to store [quantity][time][x][y][z] initialized to zero[cite: 6]
-    std::vector<std::vector<std::vector<std::vector<std::vector<double>>>>> Tnv(7,std::vector<std::vector<std::vector<std::vector<double>>>>(nbins,std::vector<std::vector<std::vector<double>>>(nbins,std::vector<std::vector<double>>(nbins,std::vector<double>(nbins,0)))));
+    std::vector<std::vector<std::vector<std::vector<std::vector<double>>>>> Tnv(nq,std::vector<std::vector<std::vector<std::vector<double>>>>(nbins,std::vector<std::vector<std::vector<double>>>(nbins,std::vector<std::vector<double>>(nbins,std::vector<double>(nbins,0)))));
     
     std::cout<<"Begin reading temperatures densities etc"<<std::endl;
     // Load physical properties from the specified path[cite: 6]
@@ -102,13 +128,21 @@ int main(int argc, char** argv)
     read_cells_element(path+"/vy.dat",Tnv[vy],nbins);
     read_cells_element(path+"/vz.dat",Tnv[vz],nbins);
     std::cout<<"read v"<<std::endl;
+    if (use_aniso)
+    {
+        read_cells_element(path+"/exx.dat",Tnv[exx],nbins);
+        read_cells_element(path+"/eyy.dat",Tnv[eyy],nbins);
+        read_cells_element(path+"/ezz.dat",Tnv[ezz],nbins);
+        long long nfill = fill_nan(Tnv[exx],aniso_fill) + fill_nan(Tnv[eyy],aniso_fill) + fill_nan(Tnv[ezz],aniso_fill);
+        std::cout<<"read local momentum anisotropy exx, eyy, ezz (" << nfill << " empty-cell values set to " << aniso_fill << ")"<<std::endl;
+    }
     std::cout<<"Finished reading temperatures densities etc"<<std::endl;
 
     int nt = tend; // Using 'tend' as the total time steps to process
     double Nfreeze = n0;
 
     // Initialize the surface builder with the loaded parameters[cite: 6]
-    HyperSurfaceBuilder builder(nt, nx, ny, nz, Nfreeze, dt, dx);
+    HyperSurfaceBuilder builder(nt, nx, ny, nz, Nfreeze, dt, dx, nq);
     
     // Iterate over the 4D spacetime grid to find the freeze-out surface[cite: 6]
     for(int i=tstart;i<tend-1;i++)

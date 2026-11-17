@@ -22,6 +22,27 @@ make -j4
 ./hypersurface_builder ../config.txt
 ```
 
+## Local momentum anisotropy (branch `local-momentum-anisotropy`)
+The surface output can also carry the local momentum anisotropy of the coarse-grained cells,
+`exx = 3Txx/(Txx+Tyy+Tzz)`, `eyy`, `ezz` (each is 1 for an isotropic cell and `exx + eyy + ezz = 3`), extracted on the same grid
+as the other fields. Put the binary files `exx.dat`, `eyy.dat`, `ezz.dat` (same layout as `e.dat`, `n.dat`: doubles, `[t][x][y][z]`)
+into the data `path` and add to `config.txt`:
+
+```
+anisotropy 1        # 0 (default): output unchanged
+aniso_fill 1.0      # value for cells without matter (NaN in the files), default 1 = isotropic
+```
+
+The three fields are linearly interpolated to the centroid of every surface element exactly like `e, n, gamma, vx, vy, vz`
+(because the interpolation is linear, `exx + eyy + ezz = 3` is preserved). Each row of `surface.dat` then has 18 columns instead of 15:
+
+| columns | content |
+|---|---|
+| 0-3 | surface element `d^3 sigma_mu` |
+| 4-7 | `t, x, y, z` of the element |
+| 8-14 | `e, T, n, gamma, vx, vy, vz` |
+| 15-17 | `exx, eyy, ezz` (only with `anisotropy 1`) |
+
 🙏 Acknowledgments & Citations
 
 This repository relies heavily on previously developed algorithms and framework realizations within the heavy-ion physics community. If you use this code in a publication, you must cite the following works:
